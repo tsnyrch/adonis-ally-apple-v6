@@ -24,8 +24,8 @@ import type {
   RedirectRequestContract,
 } from '@adonisjs/ally/types'
 import { HttpContext } from '@adonisjs/core/http'
+import * as jose from 'jose'
 import JWT from 'jsonwebtoken'
-import JWKS, { CertSigningKey, JwksClient, RsaSigningKey } from 'jwks-rsa'
 import { DateTime } from 'luxon'
 
 /**
@@ -128,9 +128,9 @@ export class AppleDriver
   protected accessTokenUrl = 'https://appleid.apple.com/auth/token'
 
   /**
-   * JWKS Client, it is used in Apple key verification process
+   * JWKS Client for Apple key verification
    */
-  protected jwksClient: JwksClient | null = null
+  protected jwksClient: ReturnType<typeof jose.createRemoteJWKSet> | null = null
 
   /**
    * The param name for the authorization code. Read the documentation of your oauth
@@ -178,21 +178,23 @@ export class AppleDriver
     super(ctx, config)
 
     /**
-     * Initiate JWKS client
+     * Initialize JWKS client
      */
-    this.jwksClient = JWKS({
-      rateLimit: true,
-      cache: true,
-      cacheMaxEntries: 100,
-      cacheMaxAge: 1000 * 60 * 60 * 24,
-      jwksUri: 'https://appleid.apple.com/auth/keys',
-    })
+    this.initializeJwksClient()
 
     /**
      * Extremely important to call the following method to clear the
      * state set by the redirect request.
      */
     this.loadState()
+  }
+
+  /**
+   * Initialize JWKS client
+   */
+  private async initializeJwksClient() {
+    const jwks = await jose.createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys'))
+    this.jwksClient = jwks
   }
 
   /**
@@ -221,14 +223,42 @@ export class AppleDriver
   }
 
   /**
-   * Get Apple Signning Keys to verify token
-   * @param token an id_token receoived from Apple
-   * @returns signing key
+   * Get Apple Signing Key to verify token
    */
-  protected async getAppleSigningKey(token: string): Promise<string> {
-    const decodedToken = JWT.decode(token, { complete: true })
-    const key = await this.jwksClient?.getSigningKey(decodedToken?.header.kid)
-    return (key as CertSigningKey)?.publicKey || (key as RsaSigningKey)?.rsaPublicKey
+  protected async verifyToken(token: string) {
+    if (!this.jwksClient) {
+      await this.initializeJwksClient()
+    }
+
+    const options = {
+      issuer: 'https://appleid.apple.com',
+      audience: this.config.appId,
+    }
+
+    try {
+      const { payload } = await jose
+        .jwtVerify(token, this.jwksClient!, options)
+        .catch(async (error) => {
+          if (error?.code === 'ERR_JWKS_MULTIPLE_MATCHING_KEYS') {
+            for await (const publicKey of error) {
+              try {
+                return await jose.jwtVerify(token, publicKey, options)
+              } catch (innerError) {
+                if (innerError?.code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED') {
+                  continue
+                }
+                throw innerError
+              }
+            }
+            throw new jose.errors.JWSSignatureVerificationFailed()
+          }
+          throw error
+        })
+
+      return payload as AppleTokenDecoded
+    } catch (error) {
+      throw new Error(`Token verification failed: ${error.message}`)
+    }
   }
 
   /**
@@ -253,23 +283,18 @@ export class AppleDriver
    * Parses user info from the Apple Token
    */
   protected async getUserInfo(token: string): Promise<AppleUserContract> {
-    const signingKey = await this.getAppleSigningKey(token)
-    const decodedUser = JWT.verify(token, signingKey, {
-      issuer: 'https://appleid.apple.com',
-      audience: this.config.appId,
-    })
-    const firstName = (decodedUser as AppleTokenDecoded)?.user?.name?.firstName || ''
-    const lastName = (decodedUser as AppleTokenDecoded)?.user?.name?.lastName || ''
+    const decodedUser = await this.verifyToken(token)
+    const firstName = decodedUser?.user?.name?.firstName || ''
+    const lastName = decodedUser?.user?.name?.lastName || ''
 
     return {
-      id: (decodedUser as AppleTokenDecoded).sub,
+      id: decodedUser.sub,
       avatarUrl: null,
       original: null,
-      nickName: (decodedUser as AppleTokenDecoded).sub,
+      nickName: decodedUser.sub,
       name: `${firstName}${lastName ? ` ${lastName}` : ''}`,
-      email: (decodedUser as AppleTokenDecoded).email,
-      emailVerificationState:
-        (decodedUser as AppleTokenDecoded).email_verified === 'true' ? 'verified' : 'unverified',
+      email: decodedUser.email,
+      emailVerificationState: decodedUser.email_verified === 'true' ? 'verified' : 'unverified',
     }
   }
 

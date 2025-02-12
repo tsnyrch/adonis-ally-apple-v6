@@ -16,7 +16,6 @@
     "pretest": "npm run lint",
     "build": "tsc"
   },
-
   "devDependencies": {
     "@adonisjs/ally": "^5.0.0-7",
     "@adonisjs/core": "^6.1.5-32",
@@ -24,13 +23,16 @@
     "@adonisjs/prettier-config": "^1.3.0",
     "@adonisjs/tsconfig": "^1.3.0",
     "@swc/core": "^1.6.3",
+    "@types/jsonwebtoken": "^9.0.8",
     "@types/luxon": "^3.4.2",
+    "i": "^0.3.7",
+    "npm": "^11.1.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   },
   "dependencies": {
+    "jose": "^5.9.6",
     "jsonwebtoken": "^9.0.2",
-    "jwks-rsa": "^3.1.0",
     "luxon": "^3.5.0"
   },
   "peerDependencies": {
@@ -38,7 +40,6 @@
     "@adonisjs/core": "^6.1.5-32"
   },
   "author": "wailroth",
-  
   "license": "MIT",
   "keywords": [
     "social-auth",
@@ -52,5 +53,4 @@
     "extends": "@adonisjs/eslint-config/package"
   },
   "prettier": "@adonisjs/prettier-config"
-
 }
