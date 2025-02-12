@@ -1,146 +1,44 @@
-# Ally driver boilerplate
-> A boilerplate for creating custom AdonisJS Ally drivers
+# Adonis Ally - Apple Sign In Driver
 
-This repo is a starting point to create your custom OAuth2 drivers for [AdonisJS ally](https://docs.adonisjs.com/guides/authentication/social-authentication).
+> adonis, adonis-ally, apple
 
-The boilerplate is tailored to create one driver per project and publish it as a package on npm.
+This driver extends Adonis Ally and allows to integrate Apple Sign In.
 
-## Getting started
+FORKED FROM https://github.com/bitkidd/adonis-ally-apple/tree/main! THANKS TO HIM.
 
-Following are the steps to get started.
+## Installation
 
-- Fork this repo and then clone it on your local machine.
-- Install all the dependencies using `npm`, `pnpm`, or `yarn` (whatever you prefer).
-- Open the `package.json` file and update the `name`, `description`, and the `author` details.
-
-  ```json
-  {
-    "name": "ally-custom-service",
-    "description": "Starter kit to create an Ally driver for an OAuth2 service",
-    "author": ""
-  }
-  ```
-
-## How is the code structured?
-
-The code for the driver is inside the `src` directory. Make sure to change the `YourDriver` keyword references inside the `src/driver.ts` file with the service name for which you are creating the driver. For example, Change `YourDriver` to `AppleDriver` or `InstagramDriver`.
-
-The driver implementation is mainly driven by the config, except for the `user` and the `userFromToken` methods. Both of these methods are specific to the Oauth provider, so you have to implement them yourself.
-
-The `src/driver.ts` file has the following exports.
-
-#### YourDriverAccessToken
-
-The type defines the properties on the access token returned by the driver. You must read your OAuth provider documentation and list all the properties here.
-
-**Do not change the pre-defined `token` and `bearer` properties.**
-
-```ts
-export type YourDriverAccessToken = {
-  token: string
-  type: 'bearer'
-}
+```bash
+npm install @wailroth/adonis-ally-apple-v6
+# or
+yarn add @wailroth/adonis-ally-apple-v6
 ```
 
-#### YourDriverScopes
+As the package has been installed, you have to configure it by running a command:
 
-Define a union of driver scopes accepted by your OAuth provider. You can check out the [official implementations](https://github.com/adonisjs/ally/blob/next/src/types.ts#L237) to see how they are defined.
-
-#### YourDriverConfig
-
-The type defines the configuration options that your driver expects. It must specify the following properties and any additional properties your driver needs to be functional.
-
-```ts
-export type YourDriverConfig = {
-  driver: 'YourDriverName'
-  clientId: string
-  clientSecret: string
-  callbackUrl: string
-  authorizeUrl?: string
-  accessTokenUrl?: string
-  userInfoUrl?: string
-}
+```bash
+node ace configure @wailroth/adonis-ally-apple-v6
 ```
 
-#### YourDriver
-
-The driver implementation is a standard TypeScript class that extends the base `Oauth2Driver` class. The base driver class forces you to define the following instance properties.
-
-- `authorizeUrl` is the URL for the redirect request. The user is redirected to this URL to authorize the request. Check out provider docs to find this URL.
-- `accessTokenUrl` is used to exchange the authorization code for the access token. Check out provider docs to find this URL.
-- `userInfoUrl` is used to get the user profile information.
-- `codeParamName` is the query string parameter for reading the **authorization code** after redirecting the user back to the callback URL.
-- `errorParamName` is the query string parameter for finding the error after redirecting the user to the callback URL.
-- `stateCookieName` is the cookie name for storing the CSRF token (also known as the state). Make sure the cookie name does not collide with other drivers. A safer option is to prefix the driver name followed by the `oauth_state` keyword.
-- `stateParamName` is the query string parameter name for setting the state during the authorization redirect.
-- `scopeParamName` is the query string parameter name for sending the scopes during the authorization redirect.
-- `scopesSeparator` is the character used for separating multiple parameters.
-
-#### YourDriverService
-A factory function to reference the driver within the `config/ally.ts` file of an AdonisJS application. For example:
+Then open the `env.ts` file and paste the following code inside the `Env.rules` object.
 
 ```ts
-import { YourDriverService } from 'your-package-name'
-
-defineConfig({
-  github: YourDriverService({
-    clientId: env.get('GITHUB_CLIENT_ID')!,
-    clientSecret: env.get('GITHUB_CLIENT_SECRET')!,
-    callbackUrl: '',
-  }),
-})
+APPLE_APP_ID: Env.schema.string(),
+APPLE_TEAM_ID: Env.schema.string(),
+APPLE_CLIENT_ID: Env.schema.string(),
+APPLE_CLIENT_SECRET: Env.schema.string(),
 ```
 
-## Development checklist
+And don't forget to add these variables to your `.env` and `.env.sample` files.
 
-- [ ] I have renamed all `YourDriver` references to a more meaningful name inside the `src/driver.ts` file.
-- [ ] I have defined the `authorizeUrl` class property.
-- [ ] I have defined the `accessTokenUrl` class property.
-- [ ] I have defined the `userInfoUrl` class property.
-- [ ] I have defined the `codeParamName` class property.
-- [ ] I have defined the `errorParamName` class property.
-- [ ] I have defined the `stateCookieName` class property.
-- [ ] I have defined the `stateParamName` class property.
-- [ ] I have defined the `scopeParamName` class property.
-- [ ] I have defined the `scopesSeparator` class property.
-- [ ] I have implemented the `accessDenied` class method.
-- [ ] I have implemented the `user` class method.
-- [ ] I have implemented the `userFromToken` class method.
+## Usage
 
-## Testing the driver
+Apple Driver environment variables have some specific usage:
 
-You can test the driver by installing it locally inside your AdonisJS application. Following are the steps you need to perform.
+- `APPLE_CLIENT_SECRET` - your app private key that you should download from [here](https://developer.apple.com/account/resources/authkeys/list)
+- `APPLE_CLIENT_ID` - the id of the key you downloaded earlier, it can be found on the same page
+- `APPLE_TEAM_ID` - you teams' id in Apple system, it can be found [here](https://developer.apple.com/account/#/membership)
+- `APPLE_APP_ID` - your app idenifier, for ex: com.adonis.ally
 
-- Compile the TypeScript code to JavaScript using the `npm run build` script.
-- `cd` into your AdonisJS project and install the package locally using `npm i path/to/your/driver/package`.
-- Finally, reference the driver using the `YourDriverService` factory function inside the `config/ally.ts` file.
+For usage examples for Adonis Ally and its methods consult Adonis.js [official docs](https://docs.adonisjs.com/guides/auth/social).
 
-## FAQ's
-
-### How do I define extra params during redirect?
-
-You can configure the redirect request by implementing the `configureRedirectRequest` method on the driver class. The method is already pre-defined and commented out.
-
-```ts
-protected configureRedirectRequest(request: RedirectRequest<YourDriverScopes>) {
-  request.param('key', 'value')
-}
-```
-
-### How do I define extra fields/params for the access token request?
-
-You can configure the access token request by implementing the `configureAccessTokenRequest` method on the driver class. The method is already pre-defined and commented out.
-
-```ts
-protected configureAccessTokenRequest(request: ApiRequest) {
-  // Request body
-  request.field('key', 'value')
-
-  // Query param
-  request.param('key', 'value')
-}
-```
-
-## Share with others
-
-Are you excited about sharing your work with others? Submit your package to the [awesome-adonisjs](https://github.com/adonisjs-community/awesome-adonisjs) repo.

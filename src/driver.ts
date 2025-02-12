@@ -15,8 +15,33 @@
  */
 
 import { Oauth2Driver } from '@adonisjs/ally'
-import type { HttpContext } from '@adonisjs/core/http'
-import type { AllyDriverContract, AllyUserContract, ApiRequestContract } from '@adonisjs/ally/types'
+import type {
+  AllyDriverContract,
+  AllyUserContract,
+  ApiRequestContract,
+  LiteralStringUnion,
+  Oauth2AccessToken,
+  RedirectRequestContract,
+} from '@adonisjs/ally/types'
+import { HttpContext } from '@adonisjs/core/http'
+import JWT from 'jsonwebtoken'
+import JWKS, { CertSigningKey, JwksClient, RsaSigningKey } from 'jwks-rsa'
+import { DateTime } from 'luxon'
+
+/**
+ * Custom OAuth exception class
+ */
+class OauthException extends Error {
+  static missingAuthorizationCode(codeParamName: string) {
+    return new OauthException(
+      `Missing authorization code in the callback request. Make sure the "${codeParamName}" query string parameter exists`
+    )
+  }
+
+  static stateMisMatch() {
+    return new OauthException('State mismatch. Possible CSRF attack attempt')
+  }
+}
 
 /**
  *
@@ -24,57 +49,88 @@ import type { AllyDriverContract, AllyUserContract, ApiRequestContract } from '@
  * token must have "token" and "type" properties and you may
  * define additional properties (if needed)
  */
-export type YourDriverAccessToken = {
-  token: string
-  type: 'bearer'
+/**
+ * Shape of Apple Access Token
+ */
+export type AppleAccessToken = Oauth2AccessToken & {
+  id_token: string
+  refreshToken: string
+  expiresIn: number
+  expiresAt: DateTime
 }
 
 /**
- * Scopes accepted by the driver implementation.
+ * Shape of the Apple decoded token
+ * https://developer.apple.com/documentation/sign_in_with_apple/sign_in_with_apple_js/incorporating_sign_in_with_apple_into_other_platforms
  */
-export type YourDriverScopes = string
+export type AppleTokenDecoded = {
+  iss: string
+  aud: string
+  exp: number
+  iat: number
+  sub: string
+  at_hash: string
+  email: string
+  email_verified: 'true' | 'false'
+  user?: {
+    email?: string
+    name?: {
+      firstName: string
+      lastName: string
+    }
+  }
+  is_private_email: boolean
+  auth_time: number
+  nonce_supported: boolean
+}
 
 /**
- * The configuration accepted by the driver implementation.
+ * Allowed Apple Sign In scopes
  */
-export type YourDriverConfig = {
+export type AppleScopes = 'email' | 'string'
+
+/**
+ * Options available for Apple
+ * @param appId App ID of your app
+ * @param teamId Team ID of your Apple Developer Account
+ * @param clientId Key ID, received from https://developer.apple.com/account/resources/authkeys/list
+ * @param clientSecret Private key, downloaded from https://developer.apple.com/account/resources/authkeys/list
+ */
+export type AppleDriverConfig = {
+  driver: 'apple'
+  appId: string
+  teamId: string
   clientId: string
   clientSecret: string
   callbackUrl: string
-  authorizeUrl?: string
-  accessTokenUrl?: string
-  userInfoUrl?: string
+  scopes?: LiteralStringUnion<AppleScopes>[]
 }
+
+export interface AppleUserContract extends Omit<AllyUserContract<AppleAccessToken>, 'token'> {}
 
 /**
  * Driver implementation. It is mostly configuration driven except the API call
  * to get user info.
  */
-export class YourDriver
-  extends Oauth2Driver<YourDriverAccessToken, YourDriverScopes>
-  implements AllyDriverContract<YourDriverAccessToken, YourDriverScopes>
+export class AppleDriver
+  extends Oauth2Driver<AppleAccessToken, AppleScopes>
+  implements AllyDriverContract<AppleAccessToken, AppleScopes>
 {
   /**
    * The URL for the redirect request. The user will be redirected on this page
    * to authorize the request.
-   *
-   * Do not define query strings in this URL.
    */
-  protected authorizeUrl = ''
+  protected authorizeUrl = 'https://appleid.apple.com/auth/authorize'
 
   /**
    * The URL to hit to exchange the authorization code for the access token
-   *
-   * Do not define query strings in this URL.
    */
-  protected accessTokenUrl = ''
+  protected accessTokenUrl = 'https://appleid.apple.com/auth/token'
 
   /**
-   * The URL to hit to get the user details
-   *
-   * Do not define query strings in this URL.
+   * JWKS Client, it is used in Apple key verification process
    */
-  protected userInfoUrl = ''
+  protected jwksClient: JwksClient | null = null
 
   /**
    * The param name for the authorization code. Read the documentation of your oauth
@@ -95,7 +151,7 @@ export class YourDriver
    * approach is to prefix the oauth provider name to `oauth_state` value. For example:
    * For example: "facebook_oauth_state"
    */
-  protected stateCookieName = 'YourDriver_oauth_state'
+  protected stateCookieName = 'apple_oauth_state'
 
   /**
    * Parameter name to be used for sending and receiving the state from.
@@ -117,15 +173,24 @@ export class YourDriver
 
   constructor(
     ctx: HttpContext,
-    public config: YourDriverConfig
+    public config: AppleDriverConfig
   ) {
     super(ctx, config)
 
     /**
+     * Initiate JWKS client
+     */
+    this.jwksClient = JWKS({
+      rateLimit: true,
+      cache: true,
+      cacheMaxEntries: 100,
+      cacheMaxAge: 1000 * 60 * 60 * 24,
+      jwksUri: 'https://appleid.apple.com/auth/keys',
+    })
+
+    /**
      * Extremely important to call the following method to clear the
      * state set by the redirect request.
-     *
-     * DO NOT REMOVE THE FOLLOWING LINE
      */
     this.loadState()
   }
@@ -135,73 +200,132 @@ export class YourDriver
    * is made by the base implementation of "Oauth2" driver and this is a
    * hook to pre-configure the request.
    */
-  // protected configureRedirectRequest(request: RedirectRequest<YourDriverScopes>) {}
+  protected configureRedirectRequest(request: RedirectRequestContract<AppleScopes>) {
+    /**
+     * Define user defined scopes or the default one's
+     */
+    request.scopes(this.config.scopes || ['email'])
 
-  /**
-   * Optionally configure the access token request. The actual request is made by
-   * the base implementation of "Oauth2" driver and this is a hook to pre-configure
-   * the request
-   */
-  // protected configureAccessTokenRequest(request: ApiRequest) {}
+    request.param('client_id', this.config.appId)
+    request.param('response_type', 'code')
+    request.param('response_mode', 'form_post')
+    request.param('grant_type', 'authorization_code')
+  }
 
   /**
    * Update the implementation to tell if the error received during redirect
    * means "ACCESS DENIED".
    */
-  accessDenied() {
+  accessDenied(): boolean {
     return this.ctx.request.input('error') === 'user_denied'
   }
 
   /**
-   * Get the user details by query the provider API. This method must return
-   * the access token and the user details both. Checkout the google
-   * implementation for same.
-   *
-   * https://github.com/adonisjs/ally/blob/develop/src/Drivers/Google/index.ts#L191-L199
+   * Get Apple Signning Keys to verify token
+   * @param token an id_token receoived from Apple
+   * @returns signing key
    */
-  async user(
-    callback?: (request: ApiRequestContract) => void
-  ): Promise<AllyUserContract<YourDriverAccessToken>> {
-    const accessToken = await this.accessToken()
-    const request = this.httpClient(this.config.userInfoUrl || this.userInfoUrl)
+  protected async getAppleSigningKey(token: string): Promise<string> {
+    const decodedToken = JWT.decode(token, { complete: true })
+    const key = await this.jwksClient?.getSigningKey(decodedToken?.header.kid)
+    return (key as CertSigningKey)?.publicKey || (key as RsaSigningKey)?.rsaPublicKey
+  }
 
+  /**
+   * Generates Client Secret
+   * https://developer.apple.com/documentation/sign_in_with_apple/generate_and_validate_tokens
+   * @returns clientSecret
+   */
+  protected generateClientSecret(): string {
+    const clientSecret = JWT.sign({}, this.config.clientSecret, {
+      algorithm: 'ES256',
+      keyid: this.config.clientId,
+      issuer: this.config.teamId,
+      audience: 'https://appleid.apple.com',
+      subject: this.config.appId,
+      expiresIn: 60,
+      header: { alg: 'ES256', kid: this.config.clientId },
+    })
+    return clientSecret
+  }
+
+  /**
+   * Parses user info from the Apple Token
+   */
+  protected async getUserInfo(token: string): Promise<AppleUserContract> {
+    const signingKey = await this.getAppleSigningKey(token)
+    const decodedUser = JWT.verify(token, signingKey, {
+      issuer: 'https://appleid.apple.com',
+      audience: this.config.appId,
+    })
+    const firstName = (decodedUser as AppleTokenDecoded)?.user?.name?.firstName || ''
+    const lastName = (decodedUser as AppleTokenDecoded)?.user?.name?.lastName || ''
+
+    return {
+      id: (decodedUser as AppleTokenDecoded).sub,
+      avatarUrl: null,
+      original: null,
+      nickName: (decodedUser as AppleTokenDecoded).sub,
+      name: `${firstName}${lastName ? ` ${lastName}` : ''}`,
+      email: (decodedUser as AppleTokenDecoded).email,
+      emailVerificationState:
+        (decodedUser as AppleTokenDecoded).email_verified === 'true' ? 'verified' : 'unverified',
+    }
+  }
+
+  /**
+   * Get access token
+   */
+  async accessToken(callback?: (request: ApiRequestContract) => void): Promise<AppleAccessToken> {
     /**
-     * Allow end user to configure the request. This should be called after your custom
-     * configuration, so that the user can override them (if needed)
+     * We expect the user to handle errors before calling this method
      */
-    if (typeof callback === 'function') {
-      callback(request)
+    if (this.hasError()) {
+      throw OauthException.missingAuthorizationCode(this.codeParamName)
     }
 
     /**
-     * Write your implementation details here.
+     * We expect the user to properly handle the state mis-match use case before
+     * calling this method
      */
-  }
-
-  async userFromToken(
-    accessToken: string,
-    callback?: (request: ApiRequestContract) => void
-  ): Promise<AllyUserContract<{ token: string; type: 'bearer' }>> {
-    const request = this.httpClient(this.config.userInfoUrl || this.userInfoUrl)
-
-    /**
-     * Allow end user to configure the request. This should be called after your custom
-     * configuration, so that the user can override them (if needed)
-     */
-    if (typeof callback === 'function') {
-      callback(request)
+    if (this.stateMisMatch()) {
+      throw OauthException.stateMisMatch()
     }
 
-    /**
-     * Write your implementation details here
-     */
-  }
-}
+    return this.getAccessToken((request) => {
+      request.header('Content-Type', 'application/x-www-form-urlencoded')
+      request.field('client_id', this.config.appId)
+      request.field('client_secret', this.generateClientSecret())
+      request.field(this.codeParamName, this.getCode())
 
-/**
- * The factory function to reference the driver implementation
- * inside the "config/ally.ts" file.
- */
-export function YourDriverService(config: YourDriverConfig): (ctx: HttpContext) => YourDriver {
-  return (ctx) => new YourDriver(ctx, config)
+      if (typeof callback === 'function') {
+        callback(request)
+      }
+    })
+  }
+
+  /**
+   * Returns details for the authorized user
+   */
+  async user(callback?: (request: ApiRequestContract) => void) {
+    const token = await this.accessToken(callback)
+    const user = await this.getUserInfo(token.id_token)
+
+    return {
+      ...user,
+      token,
+    }
+  }
+
+  /**
+   * Finds the user by the access token
+   */
+  async userFromToken(token: string) {
+    const user = await this.getUserInfo(token)
+
+    return {
+      ...user,
+      token: { token, type: 'bearer' as const },
+    }
+  }
 }
