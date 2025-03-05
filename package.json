@@ -24,7 +24,8 @@
     "compile": "npm run clean && tsc",
     "lint": "eslint . --ext=.ts --fix",
     "release": "np",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test": ""
   },
   "devDependencies": {
     "@adonisjs/ally": "^5.0.0-7",
