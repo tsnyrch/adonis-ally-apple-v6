@@ -1,7 +1,7 @@
 {
   "name": "@wailroth/adonis-ally-apple-v6",
   "description": "Ally driver for Apple Sign In",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "main": "index.js",
   "type": "module",
   "files": [
