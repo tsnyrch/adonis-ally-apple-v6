@@ -31,6 +31,18 @@ APPLE_CLIENT_SECRET: Env.schema.string(),
 
 And don't forget to add these variables to your `.env` and `.env.sample` files.
 
+# PUT THE CONFIGURATION IN ALLY.TS FILE
+```ts
+  apple: apple({
+    clientId: env.get('APPLE_CLIENT_ID') || "",
+    clientSecret: env.get('APPLE_CLIENT_SECRET') || "",
+    callbackUrl: //your url
+    appId: env.get('APPLE_APP_ID') || "",
+    teamId: env.get('APPLE_TEAM_ID') || "",
+    driver: "apple",
+  }),
+```
+
 ## Usage
 
 Apple Driver environment variables have some specific usage:
