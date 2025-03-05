@@ -39,7 +39,8 @@
     "i": "^0.3.7",
     "npm": "^11.1.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "np": "^9.2.0"
   },
   "dependencies": {
     "jose": "^5.9.6",
