@@ -170,7 +170,7 @@ export class AppleDriver
 
     const options = {
       issuer: 'https://appleid.apple.com',
-      audience: this.config.appId,
+      audience: this.config.clientId,
     }
 
     try {

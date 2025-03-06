@@ -48,7 +48,7 @@ And don't forget to add these variables to your `.env` and `.env.sample` files.
 Apple Driver environment variables have some specific usage:
 
 - `APPLE_CLIENT_SECRET` - your app private key that you should download from [here](https://developer.apple.com/account/resources/authkeys/list)
-- `APPLE_CLIENT_ID` - the id of the key you downloaded earlier, it can be found on the same page
+- `APPLE_CLIENT_ID` - the id of the key you downloaded earlier, it can be found on the same page. Generaly the app package (for example com.example)
 - `APPLE_TEAM_ID` - you teams' id in Apple system, it can be found [here](https://developer.apple.com/account/#/membership)
 - `APPLE_APP_ID` - your app idenifier, for ex: com.adonis.ally
 
