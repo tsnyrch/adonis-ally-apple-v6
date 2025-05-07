@@ -34,7 +34,84 @@ APPLE_CLIENT_SECRET=
 - `APPLE_CLIENT_ID`: Your Apple Service ID identifier (e.g. "com.example.app")
 - `APPLE_TEAM_ID`: Your Apple Developer Team ID
 - `APPLE_KEY_ID`: The Key ID for the private key issued in your Apple Developer account
-- `APPLE_CLIENT_SECRET`: The private key used for signing client tokens (in PEM format)
+- `APPLE_CLIENT_SECRET`: The JWT client secret token that's required for API requests. **IMPORTANT: This is not your private key itself, but a JWT token you must generate using your private key.**
+
+### About Apple Client Secret
+
+⚠️ **IMPORTANT: Apple's client secret is different from most OAuth providers!**
+
+Unlike other OAuth providers where the client secret is a fixed string, Apple requires a JWT token as the client secret. This JWT token:
+
+1. **Has an expiration date** (maximum 6 months)
+2. Must be signed with your private key downloaded from Apple Developer account
+3. Must contain specific claims (iss, sub, aud, exp, iat)
+
+#### How to Generate the Client Secret JWT
+
+You can create the JWT token using a library like `jsonwebtoken`. Here's a robust function to generate your client secret:
+
+```typescript
+import jwt from 'jsonwebtoken'
+import * as fs from 'fs'
+
+/**
+ * Generate an Apple client secret JWT
+ */
+function generateAppleClientSecret({
+  clientId,
+  teamId,
+  keyId,
+  privateKeyPath,
+  expAfter = 15552000, // 180 days in seconds (6 months max)
+}) {
+  // Validate required parameters
+  if (!clientId) throw new Error('clientId is required')
+  if (!teamId) throw new Error('teamId is required')
+  if (!keyId) throw new Error('keyId is required')
+  if (!privateKeyPath) throw new Error('Either privateKey or privateKeyPath is required')
+  if (privateKeyPath && !fs.existsSync(privateKeyPath))
+    throw new Error(`Private key file not found at: ${privateKeyPath}`)
+
+  // Prepare JWT claims
+  const now = Math.floor(Date.now() / 1000)
+  const claims = {
+    iss: teamId,
+    iat: now,
+    exp: now + expAfter,
+    aud: 'https://appleid.apple.com',
+    sub: clientId,
+  }
+
+  // Set header with key ID
+  const header = { alg: 'ES256', kid: keyId }
+
+  // Get the private key content
+  const key = privateKeyPath ? fs.readFileSync(privateKeyPath) : privateKey
+
+  // Sign and return the JWT
+  return jwt.sign(claims, key, { algorithm: 'ES256', header })
+}
+
+// Example usage:
+const clientSecret = generateAppleClientSecret({
+  clientId: 'com.example.app', // Your Service ID
+  teamId: 'TEAM123456',        // Your Team ID
+  keyId: 'ABC123DEFG',         // Your Key ID
+  privateKeyPath: './AuthKey_ABC123DEFG.p8'
+});
+
+console.log('CLIENT SECRET: ', clientSecret) // Use this as your APPLE_CLIENT_SECRET
+```
+
+#### Production Recommendations
+
+Since the JWT expires, you should implement a strategy to rotate it before expiration:
+
+1. Set up a system to regenerate the token before it expires (e.g., every 5 months)
+2. Store the newly generated token securely
+3. Update your application's environment variables or configuration
+
+For detailed instructions, refer to [Apple's official documentation](https://developer.apple.com/documentation/accountorganizationaldatasharing/creating-a-client-secret).
 
 ### Setup in Ally Config
 
@@ -107,7 +184,7 @@ const appleConfig = {
   clientId: 'YOUR_CLIENT_ID',
   teamId: 'YOUR_TEAM_ID',
   keyId: 'YOUR_KEY_ID',
-  clientSecret: 'YOUR_PRIVATE_KEY',
+  clientSecret: 'YOUR_JWT_CLIENT_SECRET', // The JWT token, not your private key
   callbackUrl: 'https://your-site.com/apple/callback',
 }
 
